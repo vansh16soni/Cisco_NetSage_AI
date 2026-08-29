@@ -1,0 +1,48 @@
+# Environment variables & Sensitive Credentials (API Keys, Mongo URLs, Secrets)
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Sensitive credentials & config files
+*.pem
+*.key
+*.cert
+*.crt
+*credential*
+*secret*
+config.local.json
+
+
+# Node.js dependencies
+node_modules/
+package-lock.json
+.npm
+.eslintcache
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+
+# Production build outputs
+/build
+/dist
+/out
+
+# System files & logs
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

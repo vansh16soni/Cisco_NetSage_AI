@@ -46,3 +46,11 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Personal project submission bundles & Archives
+AI_Project_VANSH_KUMAR_SONI/
+AI_Project_VANSH_KUMAR_SONI.zip
+*.zip
+*.tar.gz
+*.rar
+

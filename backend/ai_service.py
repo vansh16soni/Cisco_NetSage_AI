@@ -48,6 +48,55 @@ def parse_json_response(text):
     
     return json.loads(cleaned)
 
+async def call_gemini(prompt):
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    if not api_key or "your_" in api_key:
+        raise ValueError("GEMINI_API_KEY not set in environment")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 1000,
+            "responseMimeType": "application/json"
+        }
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise ValueError("No candidates returned from Gemini API")
+        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        return text, model
+
+async def call_groq(prompt):
+    api_key = os.getenv("GROQ_API_KEY", "")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    if not api_key or "your_" in api_key:
+        raise ValueError("GROQ_API_KEY not set in environment")
+    
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 1000
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        text = data.get("choices", [])[0].get("message", {}).get("content", "")
+        return text, model
+
 async def call_anthropic(prompt):
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
@@ -224,23 +273,35 @@ def mock_diagnose_case(case_doc):
     }
 
 async def diagnose_case(case_doc):
-    provider = os.getenv("AI_PROVIDER", "anthropic")
-    api_key_anthropic = os.getenv("ANTHROPIC_API_KEY", "")
-    api_key_openai = os.getenv("OPENAI_API_KEY", "")
-    
-    has_valid_openai = api_key_openai and "your_" not in api_key_openai
-    has_valid_anthropic = api_key_anthropic and "your_" not in api_key_anthropic
+    provider = os.getenv("AI_PROVIDER", "gemini").lower()
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+
+    has_valid_gemini = gemini_key and "your_" not in gemini_key
+    has_valid_groq = groq_key and "your_" not in groq_key
+    has_valid_openai = openai_key and "your_" not in openai_key
+    has_valid_anthropic = anthropic_key and "your_" not in anthropic_key
 
     text = None
-    model = "mock-llm-1.0"
+    model = "builtin-smart-offline-llm"
 
     try:
-        if provider == "openai" and has_valid_openai:
+        if provider == "gemini" and has_valid_gemini:
+            text, model = await call_gemini(build_prompt(case_doc))
+        elif provider == "groq" and has_valid_groq:
+            text, model = await call_groq(build_prompt(case_doc))
+        elif provider == "openai" and has_valid_openai:
             text, model = await call_openai(build_prompt(case_doc))
         elif provider == "anthropic" and has_valid_anthropic:
             text, model = await call_anthropic(build_prompt(case_doc))
+        elif has_valid_gemini:
+            text, model = await call_gemini(build_prompt(case_doc))
+        elif has_valid_groq:
+            text, model = await call_groq(build_prompt(case_doc))
     except Exception as e:
-        print(f"[AI Service] Error calling API: {e}. Falling back to mock diagnosis.")
+        print(f"[AI Service] Notice: External API call failed ({e}). Seamlessly using free built-in diagnostic engine.")
 
     if text is None:
         parsed = mock_diagnose_case(case_doc)

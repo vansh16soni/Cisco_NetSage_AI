@@ -35,6 +35,8 @@ ENV/
 .pytest_cache/
 
 # Production build outputs
+build/
+**/build/
 /build
 /dist
 /out
@@ -53,4 +55,11 @@ AI_Project_VANSH_KUMAR_SONI.zip
 *.zip
 *.tar.gz
 *.rar
+
+# Documentation & Guide files
+*guide*.md
+guide.md
+RENDER_DEPLOYMENT_GUIDE.md
+submission_guide.md
+
 

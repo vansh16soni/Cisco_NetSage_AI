@@ -29,9 +29,10 @@ export default function ReviewForm({ diagnosis, onCancel, onSaved }) {
     }
     setBusy(true);
     try {
-      const result = await editDiagnosis(diagnosis._id, { ...form, reason, reviewerName });
+      const diagId = diagnosis.id || diagnosis._id;
+      const result = await editDiagnosis(diagId, { correctedDiagnosis: form, reason, reviewerName });
       showToast('Diagnosis updated and correction logged.');
-      onSaved(result.diagnosis);
+      onSaved(result.diagnosis || { ...diagnosis, ...form, status: 'Edited' });
     } catch (err) {
       showToast(err.response?.data?.error || 'Failed to save edit', 'error');
     } finally {

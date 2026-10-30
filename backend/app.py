@@ -12,6 +12,15 @@ from dotenv import load_dotenv
 
 from rule_checker import check_show_output
 from ai_service import diagnose_case
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    decode_access_token,
+    get_optional_user,
+    seed_default_admin,
+    log_activity
+)
 
 load_dotenv()
 
@@ -21,9 +30,12 @@ PORT = int(os.getenv("PORT", 5000))
 app = FastAPI(title="NetSage AI Backend")
 
 # Setup CORS
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()
+allowed_origins = [FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"] if FRONTEND_URL else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For local React development
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +44,14 @@ app.add_middleware(
 # Connect to MongoDB
 client = MongoClient(MONGO_URI)
 db = client.get_database()
+
+@app.on_event("startup")
+async def startup_db_init():
+    try:
+        db["users"].create_index("email", unique=True)
+        seed_default_admin(db)
+    except Exception as e:
+        print(f"[app] Startup notice: {e}")
 
 # Serialization helpers
 def serialize_doc(doc):
@@ -82,8 +102,221 @@ def re_words(text):
 
 # --- API Routes ---
 
+# --- Health Check Route ---
+@app.get("/")
+@app.get("/healthz")
+async def root_health():
+    return {
+        "status": "healthy",
+        "service": "NetSage AI Backend",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+# --- Authentication Routes ---
+
+@app.post("/api/auth/register")
+async def register(payload: dict):
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    name = (payload.get("name") or "").strip() or (email.split("@")[0] if "@" in email else "User")
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long.")
+
+    if db["users"].find_one({"email": email}):
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+
+    new_user = {
+        "email": email,
+        "passwordHash": hash_password(password),
+        "name": name,
+        "role": "user",
+        "status": "active",
+        "createdAt": datetime.datetime.utcnow(),
+        "updatedAt": datetime.datetime.utcnow()
+    }
+    result = db["users"].insert_one(new_user)
+    user_id = str(result.inserted_id)
+    token = create_access_token(user_id, email, "user", name)
+    log_activity(db, new_user, "REGISTER", f"User {email} registered an account")
+
+    return {
+        "token": token,
+        "user": {
+            "id": user_id,
+            "email": email,
+            "name": name,
+            "role": "user",
+            "status": "active"
+        }
+    }
+
+@app.post("/api/auth/login")
+async def login(payload: dict):
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+
+    user = db["users"].find_one({"email": email})
+    if not user or not verify_password(password, user.get("passwordHash", "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    if user.get("status") == "suspended":
+        raise HTTPException(status_code=403, detail="Your account has been suspended by an administrator. Access denied.")
+
+    user_id = str(user["_id"])
+    role = user.get("role", "user")
+    name = user.get("name") or (email.split("@")[0] if "@" in email else "User")
+    token = create_access_token(user_id, email, role, name)
+    log_activity(db, user, "LOGIN", f"User {email} logged in")
+
+    return {
+        "token": token,
+        "user": {
+            "id": user_id,
+            "email": email,
+            "name": name,
+            "role": role,
+            "status": user.get("status", "active")
+        }
+    }
+
+@app.get("/api/auth/me")
+async def get_me(request: Request):
+    user = get_optional_user(request, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {
+        "user": {
+            "id": str(user["_id"]),
+            "email": user["email"],
+            "name": user.get("name") or (user["email"].split("@")[0] if "@" in user["email"] else "User"),
+            "role": user.get("role", "user"),
+            "status": user.get("status", "active")
+        }
+    }
+
+# --- Admin User Management Endpoints (Admin Only) ---
+
+@app.get("/api/admin/users")
+async def get_all_users_admin(request: Request):
+    admin = get_optional_user(request, db)
+    if not admin or admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Administrator privileges required.")
+
+    users = list(db["users"].find({}).sort("createdAt", -1))
+    results = []
+    for u in users:
+        uid = u["_id"]
+        act_count = db["user_activity"].count_documents({"userId": uid})
+        last_act = db["user_activity"].find_one({"userId": uid}, sort=[("timestamp", -1)])
+        
+        results.append({
+            "id": str(uid),
+            "email": u.get("email"),
+            "name": u.get("name", u.get("email", "").split("@")[0]),
+            "role": u.get("role", "user"),
+            "status": u.get("status", "active"),
+            "createdAt": u.get("createdAt").isoformat() + "Z" if isinstance(u.get("createdAt"), datetime.datetime) else str(u.get("createdAt", "")),
+            "activityCount": act_count,
+            "lastActive": last_act.get("timestamp").isoformat() + "Z" if last_act and isinstance(last_act.get("timestamp"), datetime.datetime) else None
+        })
+    return results
+
+@app.get("/api/admin/users/{user_id}/activity")
+async def get_user_activity_admin(user_id: str, request: Request):
+    admin = get_optional_user(request, db)
+    if not admin or admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Administrator privileges required.")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid User ID format")
+
+    target = db["users"].find_one({"_id": ObjectId(user_id)})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    logs = list(db["user_activity"].find({"userId": ObjectId(user_id)}).sort("timestamp", -1).limit(50))
+    serialized = []
+    for log in logs:
+        ts = log.get("timestamp")
+        serialized.append({
+            "id": str(log["_id"]),
+            "action": log.get("action"),
+            "details": log.get("details"),
+            "timestamp": ts.isoformat() + "Z" if isinstance(ts, datetime.datetime) else str(ts)
+        })
+
+    return {
+        "user": {
+            "id": str(target["_id"]),
+            "email": target.get("email"),
+            "name": target.get("name"),
+            "role": target.get("role"),
+            "status": target.get("status", "active")
+        },
+        "activities": serialized
+    }
+
+@app.post("/api/admin/users/{user_id}/status")
+async def update_user_status_admin(user_id: str, payload: dict, request: Request):
+    admin = get_optional_user(request, db)
+    if not admin or admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Administrator privileges required.")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid User ID format")
+
+    if str(admin["_id"]) == user_id:
+        raise HTTPException(status_code=400, detail="Administrators cannot suspend their own account.")
+
+    new_status = (payload.get("status") or "").lower()
+    if new_status not in ["active", "suspended"]:
+        raise HTTPException(status_code=400, detail="Status must be 'active' or 'suspended'.")
+
+    target = db["users"].find_one({"_id": ObjectId(user_id)})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db["users"].update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"status": new_status, "updatedAt": datetime.datetime.utcnow()}}
+    )
+
+    log_activity(db, admin, "USER_STATUS_CHANGE", f"Admin set user '{target.get('email')}' status to {new_status.upper()}")
+    return {"message": f"User status updated to {new_status}.", "status": new_status}
+
+@app.delete("/api/admin/users/{user_id}")
+async def delete_user_admin(user_id: str, request: Request):
+    admin = get_optional_user(request, db)
+    if not admin or admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Administrator privileges required.")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid User ID format")
+
+    if str(admin["_id"]) == user_id:
+        raise HTTPException(status_code=400, detail="Administrators cannot delete their own account.")
+
+    target = db["users"].find_one({"_id": ObjectId(user_id)})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db["users"].delete_one({"_id": ObjectId(user_id)})
+    db["user_activity"].delete_many({"userId": ObjectId(user_id)})
+
+    log_activity(db, admin, "USER_DELETED", f"Admin deleted user '{target.get('email')}'")
+    return {"message": f"User {target.get('email')} permanently deleted."}
+
+
+
 @app.get("/api/cases")
-async def list_cases(conceptTag: str = None, severity: str = None, osiLayer: str = None):
+async def list_cases(conceptTag: str = None, severity: str = None, osiLayer: str = None, status: str = None):
     query = {}
     if conceptTag:
         query["conceptTag"] = conceptTag
@@ -93,7 +326,31 @@ async def list_cases(conceptTag: str = None, severity: str = None, osiLayer: str
         query["osiLayer"] = osiLayer
         
     cases = list(db["cases"].find(query).sort("createdAt", -1))
-    return [serialize_doc(c) for c in cases]
+    
+    # Map latest diagnosis for each case
+    case_ids = [c["_id"] for c in cases]
+    diagnoses = list(db["diagnoses"].find({"case": {"$in": case_ids}}).sort("createdAt", -1))
+    diag_map = {}
+    for d in diagnoses:
+        cid = str(d["case"])
+        if cid not in diag_map:
+            diag_map[cid] = d
+            
+    result = []
+    for c in cases:
+        serialized = serialize_doc(c)
+        latest_d = diag_map.get(serialized["id"])
+        serialized["status"] = latest_d.get("status", "Unreviewed") if latest_d else "Unreviewed"
+        serialized["hasDiagnosis"] = latest_d is not None
+        if latest_d:
+            serialized["latestDiagnosisId"] = str(latest_d["_id"])
+            serialized["confidence"] = latest_d.get("confidence")
+            serialized["ruleAdjustedConfidence"] = latest_d.get("ruleAdjustedConfidence")
+        if status and serialized["status"].lower() != status.lower():
+            continue
+        result.append(serialized)
+        
+    return result
 
 @app.get("/api/cases/{case_id}")
 async def get_case(case_id: str):
@@ -108,6 +365,36 @@ async def get_case(case_id: str):
     return {
         "case": serialize_doc(case_doc),
         "diagnosis": serialize_doc(diagnosis) if diagnosis else None
+    }
+
+@app.post("/api/cases/{case_id}/verify")
+async def verify_case_fix(case_id: str, payload: dict):
+    if not ObjectId.is_valid(case_id):
+        raise HTTPException(status_code=400, detail="Invalid Case ID format")
+    case_doc = db["cases"].find_one({"_id": ObjectId(case_id)})
+    if not case_doc:
+        raise HTTPException(status_code=404, detail="Case not found")
+        
+    verification_outputs = payload.get("verificationOutputs", [])
+    findings = check_show_output(verification_outputs)
+    
+    is_clean = len(findings) == 0
+    verification_record = {
+        "verified": is_clean,
+        "verifiedAt": datetime.datetime.utcnow().isoformat() + "Z",
+        "findingsCount": len(findings),
+        "findings": findings
+    }
+    
+    db["cases"].update_one(
+        {"_id": ObjectId(case_id)},
+        {"$set": {"lastVerification": verification_record}}
+    )
+    
+    return {
+        "verified": is_clean,
+        "findings": findings,
+        "message": "All deterministic checks passed! Fix verified in lab." if is_clean else f"{len(findings)} fault(s) still detected in verification CLI output."
     }
 
 @app.post("/api/cases")
@@ -192,14 +479,18 @@ async def get_diagnosis_history(case_id: str):
     return [serialize_doc(d) for d in diagnoses]
 
 @app.post("/api/review/{diagnosis_id}/accept")
-async def accept_diagnosis(diagnosis_id: str, body: dict = None):
+async def accept_diagnosis(diagnosis_id: str, request: Request, body: dict = None):
     if not ObjectId.is_valid(diagnosis_id):
         raise HTTPException(status_code=400, detail="Invalid Diagnosis ID format")
     diagnosis = db["diagnoses"].find_one({"_id": ObjectId(diagnosis_id)})
     if not diagnosis:
         raise HTTPException(status_code=404, detail="Diagnosis not found")
         
-    reviewer_name = (body or {}).get("reviewerName", "Anonymous Reviewer")
+    user = get_optional_user(request, db)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin permissions required to review diagnoses. Please log in as admin (admin@net).")
+        
+    reviewer_name = (body or {}).get("reviewerName") or user.get("name") or "Administrator"
     
     # Update status
     db["diagnoses"].update_one(
@@ -221,16 +512,21 @@ async def accept_diagnosis(diagnosis_id: str, body: dict = None):
     return {"message": "Diagnosis accepted"}
 
 @app.post("/api/review/{diagnosis_id}/edit")
-async def edit_diagnosis(diagnosis_id: str, body: dict):
+async def edit_diagnosis(diagnosis_id: str, request: Request, body: dict = None):
     if not ObjectId.is_valid(diagnosis_id):
         raise HTTPException(status_code=400, detail="Invalid Diagnosis ID format")
     diagnosis = db["diagnoses"].find_one({"_id": ObjectId(diagnosis_id)})
     if not diagnosis:
         raise HTTPException(status_code=404, detail="Diagnosis not found")
         
+    user = get_optional_user(request, db)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin permissions required to review diagnoses. Please log in as admin (admin@net).")
+        
+    body = body or {}
     corrected = body.get("correctedDiagnosis")
     reason = body.get("reason", "")
-    reviewer = body.get("reviewerName", "Anonymous Reviewer")
+    reviewer = body.get("reviewerName") or user.get("name") or "Administrator"
     
     if not corrected or "rootCause" not in corrected:
         raise HTTPException(status_code=400, detail="Corrected diagnosis fields are required.")
@@ -286,15 +582,20 @@ async def edit_diagnosis(diagnosis_id: str, body: dict):
     return {"message": "Diagnosis edit registered"}
 
 @app.post("/api/review/{diagnosis_id}/reject")
-async def reject_diagnosis(diagnosis_id: str, body: dict):
+async def reject_diagnosis(diagnosis_id: str, request: Request, body: dict = None):
     if not ObjectId.is_valid(diagnosis_id):
         raise HTTPException(status_code=400, detail="Invalid Diagnosis ID format")
     diagnosis = db["diagnoses"].find_one({"_id": ObjectId(diagnosis_id)})
     if not diagnosis:
         raise HTTPException(status_code=404, detail="Diagnosis not found")
         
+    user = get_optional_user(request, db)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin permissions required to review diagnoses. Please log in as admin (admin@net).")
+        
+    body = body or {}
     reason = body.get("reason", "")
-    reviewer = body.get("reviewerName", "Anonymous Reviewer")
+    reviewer = body.get("reviewerName") or user.get("name") or "Administrator"
     
     db["diagnoses"].update_one(
         {"_id": ObjectId(diagnosis_id)},

@@ -7,6 +7,7 @@ import json
 import csv
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from auth import seed_default_admin
 
 # Load env variables
 load_dotenv()
@@ -33,6 +34,10 @@ def seed():
     # 2. Insert cases
     result = db["cases"].insert_many(cases)
     print(f"[seed] inserted {len(result.inserted_ids)} cases into MongoDB")
+
+    # 3. Seed default admin and create indexes
+    db["users"].create_index("email", unique=True)
+    seed_default_admin(db)
 
     # 3. Export to cases.csv in the workspace root
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

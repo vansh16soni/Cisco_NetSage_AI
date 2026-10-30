@@ -30,12 +30,10 @@ PORT = int(os.getenv("PORT", 5000))
 app = FastAPI(title="NetSage AI Backend")
 
 # Setup CORS
-FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()
-allowed_origins = [FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"] if FRONTEND_URL else ["*"]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origin_regex=r"https?://.*",
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,13 +41,19 @@ app.add_middleware(
 
 # Connect to MongoDB
 client = MongoClient(MONGO_URI)
-db = client.get_database()
+try:
+    db = client.get_default_database(default="netsage_ai")
+except Exception:
+    db = client["netsage_ai"]
 
 @app.on_event("startup")
 async def startup_db_init():
     try:
         db["users"].create_index("email", unique=True)
         seed_default_admin(db)
+        if db["cases"].count_documents({}) == 0:
+            from seed import seed
+            seed()
     except Exception as e:
         print(f"[app] Startup notice: {e}")
 
@@ -699,6 +703,17 @@ async def run_deterministic_check(payload: dict):
     show_outputs = payload.get("showOutputs", [])
     findings = check_show_output(show_outputs)
     return {"findings": findings}
+
+# Register alternative routes without /api prefix for maximum deployment compatibility
+for r in list(app.routes):
+    if hasattr(r, "path") and r.path.startswith("/api/"):
+        app.add_api_route(
+            r.path[4:],
+            r.endpoint,
+            methods=r.methods,
+            response_model=getattr(r, "response_model", None),
+            include_in_schema=False
+        )
 
 
 if __name__ == "__main__":

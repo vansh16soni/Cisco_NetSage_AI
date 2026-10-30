@@ -30,10 +30,32 @@ const PIE_COLORS = ['#38bdf8', '#818cf8', '#34d399', '#fbbf24', '#f87171', '#c08
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+
+  const fetchStats = () => {
+    setError(null);
+    getDashboardStats()
+      .then(setStats)
+      .catch((err) => {
+        console.error('Failed to load dashboard stats:', err);
+        setError('Unable to reach backend API. Please verify the backend service is running and connected.');
+      });
+  };
 
   useEffect(() => {
-    getDashboardStats().then(setStats);
+    fetchStats();
   }, []);
+
+  if (error) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <p style={{ color: '#f87171', marginBottom: 16 }}>{error}</p>
+        <button className="btn secondary" onClick={fetchStats}>
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
 
   if (!stats) {
     return <p style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Loading dashboard telemetry...</p>;

@@ -22,7 +22,10 @@ def seed():
 
     # 1. Connect to MongoDB
     client = MongoClient(MONGO_URI)
-    db = client.get_database() # gets the db from URI
+    try:
+        db = client.get_default_database(default="netsage_ai")
+    except Exception:
+        db = client["netsage_ai"]
     
     # We clear the cases, diagnoses, reviews, and aicorrectionlogs collections
     db["cases"].delete_many({})

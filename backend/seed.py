@@ -23,7 +23,7 @@ def seed():
     # 1. Connect to MongoDB
     client = MongoClient(MONGO_URI)
     try:
-        db = client.get_default_database(default="netsage_ai")
+        db = client.get_database()
     except Exception:
         db = client["netsage_ai"]
     

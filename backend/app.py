@@ -42,7 +42,7 @@ app.add_middleware(
 # Connect to MongoDB
 client = MongoClient(MONGO_URI)
 try:
-    db = client.get_default_database(default="netsage_ai")
+    db = client.get_database()
 except Exception:
     db = client["netsage_ai"]
 
@@ -704,14 +704,15 @@ async def run_deterministic_check(payload: dict):
     findings = check_show_output(show_outputs)
     return {"findings": findings}
 
+from starlette.routing import Route
+
 # Register alternative routes without /api prefix for maximum deployment compatibility
 for r in list(app.routes):
-    if hasattr(r, "path") and r.path.startswith("/api/"):
+    if isinstance(r, Route) and r.path.startswith("/api/"):
         app.add_api_route(
             r.path[4:],
             r.endpoint,
-            methods=r.methods,
-            response_model=getattr(r, "response_model", None),
+            methods=list(r.methods or []),
             include_in_schema=False
         )
 

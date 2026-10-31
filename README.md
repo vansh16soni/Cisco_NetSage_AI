@@ -1,162 +1,229 @@
 # NetSage AI
 
-AI-assisted network troubleshooting helper for Cisco Packet Tracer labs. Given a symptom,
-topology notes, and `show` command output, the AI suggests a root cause, OSI layer, confidence
-score, next diagnostic command, and fix steps. Every AI diagnosis is reviewed by a human
-(Accept / Edit / Reject), and corrections are logged for transparency.
+**AI-Assisted Network Troubleshooting Helper for Cisco Packet Tracer Labs**
 
-## Stack
+NetSage AI bridges network engineering theory and automated diagnostics. Given a fault symptom, topology context, and Cisco IOS `show` command outputs from a Packet Tracer lab, NetSage AI suggests a root cause, OSI layer, confidence score, next diagnostic commands, and concrete remediation steps.
 
-- **Frontend:** React (Router, Context, Recharts) - no heavy UI framework, custom lightweight CSS
-- **Backend:** Node.js + Express
-- **Database:** MongoDB + Mongoose
-- **AI:** Anthropic Claude or OpenAI GPT-4 (switchable via `.env`), structured JSON output
-- **Rule Checker:** Pure Node.js, no Python anywhere in the stack
+Every AI diagnosis is reviewed by a human engineer (Accept / Edit / Reject), and all corrections are captured in a transparent **Responsible AI Audit Log** with real-time telemetry on an **Analytics Dashboard**.
+
+---
+
+## Key Features
+
+- **32 Realistic Packet Tracer Lab Scenarios:** Covering VLANs, Subnetting, Inter-VLAN Routing, ACLs, NAT/PAT, DHCP, DNS, STP, Switching, and Interface misconfigurations across OSI Layers 1–4.
+- **Dual-Engine Diagnosis:**
+  - **Free-Tier AI LLMs:** Powered by Google Gemini (`gemini-1.5-flash`) or Groq (`llama-3.3-70b-versatile`) with structured JSON schema output.
+  - **Offline Heuristic Engine:** Works seamlessly out-of-the-box even without an active internet connection or API keys.
+- **Deterministic Rule Checker:** A pure Python safety net that validates interface states, subnet masks, gateway matches, duplicate IPs, VLAN assignments, default routes, and ACLs without LLM hallucinations.
+- **Human-in-the-Loop Review:** Engineers verify, edit, or reject AI diagnoses. Modifications automatically generate audit trail records.
+- **Role-Based Access Control & User Management:**
+  - Secure PBKDF2 salted password hashing & HMAC signed tokens.
+  - Role-based separation for **Regular Users** and **Administrators**.
+  - **Admin Console:** Real-time visibility into registered users, individual user activity audits, account suspension/reactivation, and user deletion.
+- **Interactive Telemetry Dashboard:** Visualizes AI-Human agreement rates, fault distributions by OSI layer and concept, severity breakdowns, and review progress.
+- **Cloud & Production Ready:** Engineered with dual-route compatibility (`/api` and root paths), Render Blueprint specification (`render.yaml`), CORS origin negotiation, and `/healthz` health monitoring.
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Details |
+|---|---|---|
+| **Frontend** | React 18, React Router v6 | Single Page App, Context API, Lucide Icons, Recharts, Custom CSS |
+| **Backend** | Python 3.10+, FastAPI, Uvicorn | Async REST API, Pydantic data validation, PyMongo |
+| **Database** | MongoDB Atlas / Local MongoDB | Automated index creation, auto-seeding of 32 cases and admin |
+| **AI Layer** | Google Gemini / Groq / Heuristic | Free-tier LLMs via HTTP APIs + offline fallback engine |
+| **Security** | PBKDF2-HMAC-SHA256, HMAC Tokens | Secure authentication, role verification, and audit logging |
+
+---
 
 ## Project Structure
 
 ```
 netsage-ai/
-  backend/
-    server.js
-    models/          Case, Diagnosis, Review, AICorrectionLog
-    routes/          cases, diagnosis, review, dashboard, check
-    services/        aiService.js, ruleChecker.js
-    config/          index.js (env loader)
-    seed.js          seeds 32 realistic troubleshooting cases
-    package.json
-  frontend/
-    src/
-      components/    Sidebar, DiagnosisPanel, ReviewForm, Badge, Toast
-      pages/         CaseList, CaseDetail, Dashboard, CorrectionLog, RuleChecker
-      api/           client.js (axios)
-      context/       AppContext.js
-    package.json
-  prompts/
-    diagnose_prompt.md   the exact system prompt used by aiService.js
-  .env.example
-  README.md
+├── backend/
+│   ├── app.py                # FastAPI main application & API routes
+│   ├── auth.py               # Authentication, token management, RBAC & audit logging
+│   ├── ai_service.py         # Multi-provider AI diagnosis (Gemini, Groq, offline heuristic)
+│   ├── rule_checker.py       # Deterministic network rule checking engine
+│   ├── seed.py               # MongoDB seeder & dataset CSV exporter
+│   ├── cases_seed.json       # 32 curated Packet Tracer troubleshooting cases
+│   └── requirements.txt      # Python dependencies (fastapi, uvicorn, pymongo, etc.)
+├── frontend/
+│   ├── src/
+│   │   ├── api/
+│   │   │   └── client.js     # Central Axios client with URL normalization & auth headers
+│   │   ├── components/
+│   │   │   ├── Sidebar.js    # Collapsible navigation & reviewer attribution
+│   │   │   ├── AuthModal.js  # Sign In / Sign Up modal dialog
+│   │   │   ├── DiagnosisPanel.js # AI output, rule checks & confidence score display
+│   │   │   ├── ReviewForm.js # Accept / Edit / Reject human review form
+│   │   │   ├── Badge.js      # Styled severity, OSI layer, and status tags
+│   │   │   └── Toast.js      # Notification popups
+│   │   ├── context/
+│   │   │   └── AppContext.js # Global state (auth, cases, filters, notifications)
+│   │   └── pages/
+│   │       ├── CaseList.js   # 32-case repository with search & filters
+│   │       ├── CaseDetail.js # Case workbench & diagnosis interface
+│   │       ├── CustomTroubleshooter.js # Ad-hoc troubleshooting for user lab inputs
+│   │       ├── RuleChecker.js # Standalone deterministic rule analyzer
+│   │       ├── Dashboard.js  # Telemetry, agreement rates & fault distribution charts
+│   │       ├── CorrectionLog.js # Responsible AI audit trail
+│   │       └── AdminPanel.js # Admin user management & activity inspector
+│   └── package.json          # Frontend dependencies & build scripts
+├── prompts/
+│   └── diagnose_prompt.md    # System prompt enforcing structured diagnosis JSON
+├── cases.csv                 # Exported dataset of all 32 network lab cases
+├── render.yaml               # Infrastructure-as-Code Blueprint for Render deployment
+├── start_servers.bat         # 1-click local launcher for Windows
+├── .env.example              # Environment variable template
+└── README.md                 # Project documentation
 ```
 
-## Prerequisites
+---
 
-- Node.js 18+
-- MongoDB running locally (or a connection string to a hosted instance, e.g. Atlas)
-- An Anthropic or OpenAI API key
+## Getting Started
 
-## Setup
+### Prerequisites
 
-### 1. Clone / unzip the project
+- **Python 3.10+**
+- **Node.js 18+ & npm**
+- **MongoDB** (Local instance or free [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) cluster)
+
+---
+
+### Local Installation & Setup
+
+#### 1. Clone the Repository
 
 ```bash
-cd netsage-ai
+git clone https://github.com/vansh16soni/Cisco_NetSage_AI.git
+cd Cisco_NetSage_AI
 ```
 
-### 2. Backend
+#### 2. Backend Setup
 
 ```bash
 cd backend
-npm install
-cp ../.env.example .env
-# edit .env: set MONGO_URI, AI_PROVIDER, and the matching API key
-npm run seed     # populates MongoDB with 32 realistic cases
-npm run dev       # starts on http://localhost:5000 (or `npm start`)
+
+# Create and activate virtual environment (optional but recommended)
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create environment configuration
+copy ..\.env.example .env   # On Windows
+# cp ../.env.example .env    # On Linux/macOS
 ```
 
-### 3. Frontend
+Edit `backend/.env` with your settings:
+```env
+PORT=5000
+MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/netsage_ai?retryWrites=true&w=majority
+JWT_SECRET=your_secret_key_here
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_free_gemini_key_here
+GEMINI_MODEL=gemini-1.5-flash
+```
 
+Seed the database and start the server:
 ```bash
-cd ../frontend
-npm install
-# optional: create .env with REACT_APP_API_URL=http://localhost:5000/api (this is the default)
-npm start          # starts on http://localhost:3000
+python seed.py   # Populates 32 cases and default administrator
+python app.py    # Runs on http://localhost:5000
 ```
 
-Open `http://localhost:3000`. The app talks to the backend at `http://localhost:5000/api`.
+#### 3. Frontend Setup
+
+In a new terminal window:
+```bash
+cd frontend
+npm install
+npm start        # Starts development server on http://localhost:3000
+```
+
+Open `http://localhost:3000` in your browser.
+
+> **Windows 1-Click Launch:** You can also simply double-click `start_servers.bat` in the project root to start both backend and frontend automatically in dedicated terminal windows.
+
+---
+
+## Default Administrator Account
+
+On initial seed/startup, NetSage AI automatically provisions the default administrator account:
+
+| Role | Email | Password | Permissions |
+|---|---|---|---|
+| **Administrator** | `admin@net` | `admin@netsage` | Full access: User Management, Account Suspension, Activity Audits, Deletion |
+
+*(Standard users can register an account directly from the frontend "Sign In" &rarr; "Register here" link).*
+
+---
 
 ## API Reference
 
-| Method | Route                              | Purpose                                    |
-|--------|-------------------------------------|---------------------------------------------|
-| GET    | `/api/cases`                        | List cases (filter by `conceptTag`, `severity`, `osiLayer`) |
-| GET    | `/api/cases/:id`                    | Get one case + its latest diagnosis        |
-| POST   | `/api/cases`                        | Create a new case                          |
-| POST   | `/api/diagnosis/:caseId`            | Run AI diagnosis for a case, store result  |
-| GET    | `/api/diagnosis/:caseId`            | Diagnosis history for a case               |
-| POST   | `/api/review/:diagnosisId/accept`   | Accept a diagnosis                         |
-| POST   | `/api/review/:diagnosisId/edit`     | Edit a diagnosis (logs a correction)       |
-| POST   | `/api/review/:diagnosisId/reject`   | Reject a diagnosis (logs a correction)     |
-| GET    | `/api/review/logs`                  | Responsible AI correction log              |
-| GET    | `/api/dashboard/stats`              | Aggregated dashboard stats                 |
-| POST   | `/api/check`                        | Run the deterministic rule checker directly|
+### Authentication & User Management
 
-## Rule Checker
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | Register a new user account | Public |
+| `POST` | `/api/auth/login` | Authenticate with email/password and obtain JWT | Public |
+| `GET` | `/api/auth/me` | Fetch profile of currently authenticated user | Authenticated |
+| `GET` | `/api/admin/users` | List all users with activity counts & status | Admin Only |
+| `GET` | `/api/admin/users/{id}/activity` | Fetch detailed action audit log for a user | Admin Only |
+| `POST` | `/api/admin/users/{id}/status` | Suspend or reactivate a user account | Admin Only |
+| `DELETE` | `/api/admin/users/{id}` | Permanently delete a user account | Admin Only |
 
-`backend/services/ruleChecker.js` exposes `checkShowOutput(showOutputs)` - a pure, deterministic
-function (no AI, no network calls) that parses raw `show` command text and flags:
+### Troubleshooting Cases & AI Diagnosis
 
-- Duplicate IP addresses
-- Inconsistent subnet masks
-- Gateway IP mismatches
-- Interfaces down / administratively down
-- Ports left in default VLAN 1 when other VLANs are defined
-- Missing default/static routes
-- ACL deny-all or missing permits
-- NAT missing `ip nat outside`, or NAT ACL producing zero translations
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| `GET` | `/api/cases` | Filterable list of all troubleshooting cases | Public |
+| `GET` | `/api/cases/{id}` | Retrieve specific case details and latest diagnosis | Public |
+| `POST` | `/api/cases` | Create a new custom troubleshooting case | Authenticated |
+| `POST` | `/api/diagnosis/{case_id}` | Trigger AI diagnosis for a pre-loaded case | Public |
+| `POST` | `/api/cases/diagnose-custom` | Trigger AI diagnosis for custom user-submitted lab input | Public |
+| `POST` | `/api/cases/{case_id}/verify` | Mark a case as verified after lab fix confirmation | Authenticated |
 
-Its findings feed into `adjustConfidence()`, which nudges the AI's raw confidence score up or
-down based on deterministic corroboration - this adjusted score is shown next to the AI's raw
-confidence in the Diagnosis Panel.
+### Human Review & Responsible AI
 
-## Demo / Walkthrough Script
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| `POST` | `/api/review/{diagnosis_id}/accept` | Accept an AI diagnosis as accurate | Public |
+| `POST` | `/api/review/{diagnosis_id}/edit` | Edit diagnosis details (logs correction) | Public |
+| `POST` | `/api/review/{diagnosis_id}/reject` | Reject diagnosis with explanation (logs correction) | Public |
+| `GET` | `/api/review/logs` | Fetch Responsible AI human correction audit trail | Public |
+| `GET` | `/api/dashboard/stats` | Aggregated dashboard telemetry metrics | Public |
+| `POST` | `/api/check` | Execute deterministic rule checker on raw `show` output | Public |
 
-Use this script to demo the full loop: broken case -> AI diagnosis -> human review -> fix -> verification.
+---
 
-1. **Show a broken case.** Open the app, go to "Cases", filter by `conceptTag = ACL`, and open
-   "Inter-VLAN routing ACL blocks server access (reference case)". Walk through the symptom,
-   topology notes, and the two `show` outputs (`show ip route`, `show access-lists`).
+## Deployment to Render
 
-2. **Run AI diagnosis.** Click "Run AI Diagnosis". Point out the returned JSON fields rendered
-   in the Diagnosis Panel: root cause, OSI layer, confidence (plus rule-adjusted confidence),
-   evidence quote, next command, and fix steps.
+NetSage AI is pre-configured for separate frontend and backend hosting on [Render](https://render.com):
 
-3. **Cross-check with the rule checker.** Note the "Rule Checker Findings" section under the AI
-   output - this is the deterministic Node.js module corroborating (or not) the AI's claim
-   independently.
+1. **Backend Web Service:**
+   - **Runtime:** `Python 3`
+   - **Root Directory:** `backend`
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `uvicorn app:app --host 0.0.0.0 --port $PORT`
+   - **Health Check Path:** `/healthz`
+   - **Environment Variables:** `MONGO_URI`, `JWT_SECRET`, `AI_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_MODEL`.
 
-4. **Human review - Accept path.** If the diagnosis looks correct, click "Accept". Status badge
-   changes to `Accepted`; this feeds the AI-Human agreement rate on the Dashboard.
+2. **Frontend Static Site:**
+   - **Runtime:** `Static`
+   - **Root Directory:** `frontend`
+   - **Build Command:** `npm install && npm run build`
+   - **Publish Directory:** `build`
+   - **Rewrite Rule:** `/*` &rarr; `/index.html`
+   - **Environment Variable:** `REACT_APP_API_URL=https://<your-backend-service>.onrender.com/api`
 
-5. **Human review - Edit path (to show correction logging).** Open a different case, run
-   diagnosis, click "Edit", change the root cause slightly, type a reason (e.g. "AI missed that
-   the ACL is also missing a permit for ICMP"), and save. Show that the status becomes `Edited`.
+---
 
-6. **Human review - Reject path.** Open a third case, run diagnosis, click "Reject", provide a
-   reason, and confirm. Status becomes `Rejected`.
+## License
 
-7. **Show the Responsible AI Log.** Navigate to "Responsible AI Log" in the sidebar. Show the
-   Edited and Rejected cases now appear with original AI output side-by-side with the corrected
-   human version and the reason.
-
-8. **Show the Dashboard.** Navigate to "Dashboard". Point out:
-   - Issues by type (bar chart)
-   - Severity breakdown (pie chart)
-   - AI-Human agreement rate (Accepted / total reviewed)
-   - Recent corrections list, linking back to the correction log
-
-9. **Standalone rule checker.** Navigate to "Rule Checker" in the sidebar, paste a raw
-   `show ip interface brief` output showing an interface `administratively down`, click
-   "Add Command Output" then "Run Rule Checker", and show the `INTERFACE_DOWN` finding appear
-   with no AI call involved - demonstrating the deterministic safety net works independently.
-
-10. **Verification.** Return to the original case, note the fix steps recommended, and explain
-    that in a live Packet Tracer lab the engineer would now apply the fix (e.g. `no shutdown`,
-    correcting an ACL permit line, etc.) and re-run the relevant `show` command to confirm
-    resolution - closing the loop from symptom to verified fix.
-
-## Notes on the AI Prompt
-
-The exact system prompt sent to the LLM lives in `prompts/diagnose_prompt.md` and is loaded
-verbatim by `aiService.js`. It enforces JSON-only output and includes three worked examples
-(ACL block, DHCP/VLAN port issue, gateway subnet mismatch) to anchor the model's response format
-and reasoning style before it sees the real case.
+This project was developed for educational and research purposes in network engineering automation and responsible AI troubleshooting.

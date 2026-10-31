@@ -5,7 +5,6 @@ import { listCases } from '../api/client';
 import Badge from '../components/Badge';
 import {
   Search,
-  Sparkles,
   ArrowRight
 } from 'lucide-react';
 
@@ -58,10 +57,6 @@ export default function CaseList() {
             Curated repository of 32 realistic Cisco Packet Tracer networking lab fault scenarios.
           </p>
         </div>
-        <Link to="/troubleshoot" className="btn">
-          <Sparkles size={15} />
-          <span>New Custom Ticket</span>
-        </Link>
       </div>
 
       {/* Metric Highlights */}
